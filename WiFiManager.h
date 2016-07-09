@@ -152,6 +152,8 @@ class WiFiManager
     uint8_t       waitForConnectResult();
 
     void          handleRoot();
+    void          handleBrowseJSON();
+    void          handleConfig();
     void          handleWifi(boolean scan);
     void          handleWifiSave();
     void          handleInfo();

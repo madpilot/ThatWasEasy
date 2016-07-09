@@ -18,7 +18,7 @@
 
 int debounce = 0;
 int buttonState = KEY_UP;
-int configMode = false;
+int configMode = true;
 
 void keySetup() {
   pinMode(BUTTON, INPUT);
@@ -199,26 +199,6 @@ void getIndex() {
   f.close();
 }
 
-void getBrowseJSON() {
-  webServer.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-  webServer.sendHeader("Pragma", "no-cache");
-  webServer.sendHeader("Expires", "-1");
-
-  Serial.println("Scanning for WIFI access points");
-
-  int n = WiFi.scanNetworks();
-  webServer.sendContent("[");
-  for (int i = 0; i < n; i++) {
-    webServer.sendContent("{\"ssid\":\"" + WiFi.SSID(i) + "\",\"rssi\":" + WiFi.RSSI(i) + ",\"encryption\":" + String(WiFi.encryptionType(i)) + "}");
-    if(i != n - 1) {
-      webServer.sendContent(",");
-    }
-  }
-  webServer.sendContent("]");
-
-  Serial.println("JSON response sent");
-}
-
 void getConfig() {
   webServer.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   webServer.sendHeader("Pragma", "no-cache");
@@ -265,7 +245,6 @@ void postSave() {
 void webServerSetup() {
   webServer.on("/", getIndex);
   webServer.on("/config.json", getConfig);
-  webServer.on("/browse.json", getBrowseJSON);
   webServer.on("/save", postSave);
   webServer.begin();
 }
