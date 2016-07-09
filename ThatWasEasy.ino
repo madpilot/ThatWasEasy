@@ -18,7 +18,7 @@
 
 int debounce = 0;
 int buttonState = KEY_UP;
-int configMode = true;
+int configMode = false;
 
 void keySetup() {
   pinMode(BUTTON, INPUT);
@@ -155,8 +155,8 @@ void readConfig() {
 void wifiSetup() {
   WiFiManager wifiManager;
   
-  WiFiManagerParameter webhook_url_parameter("webhook_url", "Webhook URL", webhook_url, WEBHOOK_URL_LEN);
-  WiFiManagerParameter device_name_parameter("device_name", "Device name", device_name, DEVICE_NAME_LEN);  
+  WiFiManagerParameter webhook_url_parameter("webhook", "Webhook URL", webhook_url, WEBHOOK_URL_LEN);
+  WiFiManagerParameter device_name_parameter("deviceName", "Device name", device_name, DEVICE_NAME_LEN);  
   
   wifiManager.setSaveConfigCallback(saveCallback);
   wifiManager.addParameter(&webhook_url_parameter);
@@ -223,10 +223,8 @@ void postSave() {
   Serial.print("Sent ");
   Serial.println(webServer.arg("plain"));
 
-  webServer.send(200, "text/plain", "done");
-
   String text = webServer.arg("plain");
-  size_t size = text.length();
+  
   DynamicJsonBuffer buf;
   JsonObject &root = buf.parseObject(text);
         
@@ -237,8 +235,10 @@ void postSave() {
     writeConfig();
     
     Serial.println("Done!");
+    webServer.send(200, "text/plain", "done");
   } else {
     Serial.println("Unable to parse JSON");
+    webServer.send(500, "text/plain", "Error!");
   }
 }
 

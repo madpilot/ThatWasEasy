@@ -115,7 +115,7 @@ void WiFiManager::setupConfigPortal() {
 
   /* Setup web pages: root, wifi config pages, SO captive portal detectors and not found. */
   server->on("/", std::bind(&WiFiManager::handleRoot, this));
-  server->on("/wifisave", std::bind(&WiFiManager::handleWifiSave, this));
+  server->on("/save", std::bind(&WiFiManager::handleWifiSave, this));
   server->on("/fwlink", std::bind(&WiFiManager::handleRoot, this));  //Microsoft captive portal. Maybe not needed. Might be handled by notFound handler.
   server->on("/browse.json", std::bind(&WiFiManager::handleBrowseJSON, this)); // Returns APs as a JSON object
   server->on("/config.json", std::bind(&WiFiManager::handleConfig, this)); // Returns a config object
@@ -416,13 +416,18 @@ void WiFiManager::handleConfig() {
   server->sendHeader("Pragma", "no-cache");
   server->sendHeader("Expires", "-1");
 
-  StaticJsonBuffer<CONFIG_LEN> buf;
 
+  StaticJsonBuffer<CONFIG_LEN> buf;
   JsonObject &root = buf.createObject();
-  //root["webhook"] = webhook_url;
-  //root["deviceName"] = device_name;
-  root["webhook"] = "";
-  root["deviceName"] = "";
+  
+  for (int i = 0; i < _paramsCount; i++) {
+    if (_params[i] == NULL) {
+      break;
+    }
+
+    root[_params[i]->getID()] = _params[i]->getValue();
+  }
+  
   root["apConfigured"] = false;
 
   char json[CONFIG_LEN];
@@ -435,68 +440,40 @@ void WiFiManager::handleConfig() {
 void WiFiManager::handleWifiSave() {
   DEBUG_WM(F("WiFi save"));
 
-  //SAVE/connect here
-  _ssid = server->arg("s").c_str();
-  _pass = server->arg("p").c_str();
+  Serial.println(server->arg("plain"));
 
-  //parameters
-  for (int i = 0; i < _paramsCount; i++) {
-    if (_params[i] == NULL) {
-      break;
+  String text = server->arg("plain");
+  
+  DynamicJsonBuffer buf;
+  JsonObject &root = buf.parseObject(text);
+        
+  if(root.success()) {
+    _ssid = String(root["ssid"].asString());
+    _pass = String(root["passkey"].asString());
+    
+    for (int i = 0; i < _paramsCount; i++) {
+      if (_params[i] == NULL) {
+        break;
+      }
+      
+      //read parameter
+      String value = root[_params[i]->getID()].asString();;
+      //store it in array
+      value.toCharArray(_params[i]->_value, _params[i]->_length);
+      DEBUG_WM(F("Parameter"));
+      DEBUG_WM(_params[i]->getID());
+      DEBUG_WM(value);
     }
-    //read parameter
-    String value = server->arg(_params[i]->getID()).c_str();
-    //store it in array
-    value.toCharArray(_params[i]->_value, _params[i]->_length);
-    DEBUG_WM(F("Parameter"));
-    DEBUG_WM(_params[i]->getID());
-    DEBUG_WM(value);
+    
+    Serial.println("Done!");
+    server->send(200, "text/html", "done");
+  } else {
+    Serial.println("Unable to parse JSON");
+    server->send(500, "text/html", "Error!");
   }
-
-  if (server->arg("ip") != "") {
-    DEBUG_WM(F("static ip"));
-    DEBUG_WM(server->arg("ip"));
-    //_sta_static_ip.fromString(server->arg("ip"));
-    String ip = server->arg("ip");
-    optionalIPFromString(&_sta_static_ip, ip.c_str());
-  }
-  if (server->arg("gw") != "") {
-    DEBUG_WM(F("static gateway"));
-    DEBUG_WM(server->arg("gw"));
-    String gw = server->arg("gw");
-    optionalIPFromString(&_sta_static_gw, gw.c_str());
-  }
-  if (server->arg("sn") != "") {
-    DEBUG_WM(F("static netmask"));
-    DEBUG_WM(server->arg("sn"));
-    String sn = server->arg("sn");
-    optionalIPFromString(&_sta_static_sn, sn.c_str());
-  }
-
-  String page = FPSTR(HTTP_HEAD);
-  page.replace("{v}", "Credentials Saved");
-  page += FPSTR(HTTP_SCRIPT);
-  page += FPSTR(HTTP_STYLE);
-  page += _customHeadElement;
-  page += FPSTR(HTTP_HEAD_END);
-  page += FPSTR(HTTP_SAVED);
-  page += FPSTR(HTTP_END);
-
-  server->send(200, "text/html", page);
-
-  DEBUG_WM(F("Sent wifi save page"));
-
+  
   connect = true; //signal ready to connect/reset
 }
-
-//removed as mentioned here https://github.com/tzapu/WiFiManager/issues/114
-/*void WiFiManager::handle204() {
-  DEBUG_WM(F("204 No Response"));
-  server->sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-  server->sendHeader("Pragma", "no-cache");
-  server->sendHeader("Expires", "-1");
-  server->send ( 204, "text/plain", "");
-}*/
 
 void WiFiManager::handleNotFound() {
   if (captivePortal()) { // If captive portal redirect instead of displaying the error page.
