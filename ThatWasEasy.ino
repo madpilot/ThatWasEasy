@@ -6,6 +6,7 @@
 #include <EEPROM.h>
 #include <FS.h>
 #include <ArduinoJson.h>
+#include <ESP8266HTTPClient.h>
 
 #include "WiFiManager.h"
 
@@ -13,11 +14,11 @@
 #define KEY_DOWN 1
 #define BUTTON 4
 
-#define DEBOUNCE_DELAY 50
+#define DEBOUNCE_DELAY 10
 
 int debounce = 0;
 int buttonState = KEY_UP;
-int configMode = true;
+int configMode = false;
 
 void keySetup() {
   pinMode(BUTTON, INPUT);
@@ -45,14 +46,6 @@ void keyLoop() {
   }
 }
 
-void keyUp() {
-  Serial.println("Key Up");
-}
-
-void keyDown() {
-  Serial.println("Key Down");
-}
-
 #define HOSTNAME "easy"
 #define CONFIG_AP_SSID "easy"
 
@@ -63,31 +56,51 @@ ESP8266WebServer webServer(80);
 
 // Needs to store:
 // {"u":[255],"d":[255],"n":[63]}
-// So 6 per key + str len + 2 commas, 2 braces
-// 6 * 3 + 255 + 255 + 63 + 2 + 2 rounded up to 600 :)
-#define CONFIG_LEN 600
-#define UP_URL_LEN 255
-#define DOWN_URL_LEN 255
+// So 6 per key + str len + 1 commas, 2 braces
+// 6 * 2 + 255 + 63 + 1 + 2 rounded up to 384 :)
+#define CONFIG_LEN 384
+#define WEBHOOK_URL_LEN 255
 #define DEVICE_NAME_LEN 63
 
-char up_url[UP_URL_LEN] = "";
-char down_url[DOWN_URL_LEN] = "";
+char webhook_url[WEBHOOK_URL_LEN] = "";
 char device_name[DEVICE_NAME_LEN] = HOSTNAME;
+
+void webhook(int state) {
+  HTTPClient http;
+  http.begin(webhook_url);
+
+  const char *payload;
+  
+  if(state == KEY_UP) {
+    payload = "{\"key\":\"up\"}";
+  } else {
+    payload = "{\"key\":\"down\"}";
+  }
+  http.addHeader("Content-type", "application/json");
+  http.POST((uint8_t *)payload, strlen(payload));
+  http.end();
+}
+
+void keyUp() {
+  Serial.println("Key Up");
+  webhook(KEY_UP);
+}
+
+void keyDown() {
+  Serial.println("Key Down");
+  webhook(KEY_DOWN);
+}
 
 int saveFlag = false;
 void saveCallback() {
   saveFlag = true;
 }
 
-void writeConfig () {
-  Serial.print("Before");
-  Serial.println(device_name);
-  
+void writeConfig () {  
   StaticJsonBuffer<CONFIG_LEN> buf;
 
   JsonObject &root = buf.createObject();
-  root["u"] = up_url;
-  root["d"] = down_url;
+  root["w"] = webhook_url;
   root["n"] = device_name;
 
   Serial.print("Saving config... ");
@@ -117,11 +130,11 @@ void readConfig() {
 
         StaticJsonBuffer<CONFIG_LEN> buf;
         JsonObject &root = buf.parseObject(json.get());
-
+        
         if(root.success()) {
-          strcpy(up_url, root["u"]);
-          strcpy(down_url, root["d"]);
+          strcpy(webhook_url, root["w"]);
           strcpy(device_name, root["n"]);
+          
           Serial.println("Done!");
         } else {
           Serial.println("Unable to parse JSON");
@@ -139,16 +152,14 @@ void readConfig() {
   }
 }
 
-void wifiConfigureSetup() {
+void wifiSetup() {
   WiFiManager wifiManager;
   
-  WiFiManagerParameter up_url_parameter("up_url", "Key Up URL", up_url, UP_URL_LEN);
-  WiFiManagerParameter down_url_parameter("down_url", "Key Down URL", down_url, DOWN_URL_LEN);
+  WiFiManagerParameter webhook_url_parameter("webhook_url", "Webhook URL", webhook_url, WEBHOOK_URL_LEN);
   WiFiManagerParameter device_name_parameter("device_name", "Device name", device_name, DEVICE_NAME_LEN);  
   
   wifiManager.setSaveConfigCallback(saveCallback);
-  wifiManager.addParameter(&up_url_parameter);
-  wifiManager.addParameter(&down_url_parameter);
+  wifiManager.addParameter(&webhook_url_parameter);
   wifiManager.addParameter(&device_name_parameter);
   
   if(configMode) {
@@ -158,12 +169,8 @@ void wifiConfigureSetup() {
     wifiManager.autoConnect(CONFIG_AP_SSID);
   }
 
-  strcpy(up_url, up_url_parameter.getValue());
-  strcpy(down_url, down_url_parameter.getValue());
+  strcpy(webhook_url, webhook_url_parameter.getValue());
   strcpy(device_name, device_name_parameter.getValue());
-
-  Serial.print("Before");
-  Serial.println(device_name);
   
   if(saveFlag) {
     writeConfig();
@@ -185,6 +192,88 @@ void setNetworkName(char *name) {
   Serial.println(".local");
 }
 
+void getIndex() {
+  File f = SPIFFS.open("/index.html", "r");
+  webServer.setContentLength(f.size());
+  webServer.streamFile(f, "text/html");
+  f.close();
+}
+
+void getBrowseJSON() {
+  webServer.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  webServer.sendHeader("Pragma", "no-cache");
+  webServer.sendHeader("Expires", "-1");
+
+  Serial.println("Scanning for WIFI access points");
+
+  int n = WiFi.scanNetworks();
+  webServer.sendContent("[");
+  for (int i = 0; i < n; i++) {
+    webServer.sendContent("{\"ssid\":\"" + WiFi.SSID(i) + "\",\"rssi\":" + WiFi.RSSI(i) + ",\"encryption\":" + String(WiFi.encryptionType(i)) + "}");
+    if(i != n - 1) {
+      webServer.sendContent(",");
+    }
+  }
+  webServer.sendContent("]");
+
+  Serial.println("JSON response sent");
+}
+
+void getConfig() {
+  webServer.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  webServer.sendHeader("Pragma", "no-cache");
+  webServer.sendHeader("Expires", "-1");
+
+  StaticJsonBuffer<CONFIG_LEN> buf;
+
+  JsonObject &root = buf.createObject();
+  root["webhook"] = webhook_url;
+  root["deviceName"] = device_name;
+  root["apConfigured"] = true;
+
+  char json[CONFIG_LEN];
+  root.printTo(json, sizeof(json));
+  webServer.sendContent(json);
+
+  Serial.println("JSON response sent");
+}
+
+void postSave() {
+  Serial.println("Saving Configuration Settings");
+  Serial.print("Sent ");
+  Serial.println(webServer.arg("plain"));
+
+  webServer.send(200, "text/plain", "done");
+
+  String text = webServer.arg("plain");
+  size_t size = text.length();
+  DynamicJsonBuffer buf;
+  JsonObject &root = buf.parseObject(text);
+        
+  if(root.success()) {
+    strcpy(webhook_url, root["webhook"]);
+    strcpy(device_name, root["deviceName"]);
+    setNetworkName(device_name);
+    writeConfig();
+    
+    Serial.println("Done!");
+  } else {
+    Serial.println("Unable to parse JSON");
+  }
+}
+
+void webServerSetup() {
+  webServer.on("/", getIndex);
+  webServer.on("/config.json", getConfig);
+  webServer.on("/browse.json", getBrowseJSON);
+  webServer.on("/save", postSave);
+  webServer.begin();
+}
+
+void webServerLoop() {
+  webServer.handleClient();
+}
+
 void setup() {
   Serial.begin(115200);
   keySetup();
@@ -195,10 +284,12 @@ void setup() {
     configMode = true;
   }
 
-  wifiConfigureSetup();
+  wifiSetup();
+  webServerSetup();
 }
 
 
 void loop() {
   keyLoop();
+  webServerLoop();
 }
