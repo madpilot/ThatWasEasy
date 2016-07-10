@@ -12,7 +12,15 @@
 
 #define KEY_UP 0
 #define KEY_DOWN 1
+
 #define BUTTON 4
+
+#define LED_1 13
+#define LED_2 14
+
+#define NO_LED 0
+#define RED_LED 1
+#define GREEN_LED 2
 
 #define DEBOUNCE_DELAY 10
 
@@ -45,6 +53,35 @@ void keyLoop() {
     }
   }
 }
+
+void ledSetup() {
+  pinMode(LED_1, OUTPUT);
+  pinMode(LED_2, OUTPUT);
+  digitalWrite(LED_1, LOW);
+  digitalWrite(LED_2, LOW);
+}
+
+void ledOn(int colour) {
+  switch(colour) {
+  case NO_LED:
+    digitalWrite(LED_1, LOW);
+    digitalWrite(LED_2, LOW);
+    break;
+  case RED_LED:
+    digitalWrite(LED_1, HIGH);
+    digitalWrite(LED_2, LOW);
+    break;
+  case GREEN_LED:
+    digitalWrite(LED_1, LOW);
+    digitalWrite(LED_2, HIGH);
+    break;
+  }
+}
+
+void ledsOff() {
+  ledOn(NO_LED);
+}
+
 
 #define HOSTNAME "easy"
 #define CONFIG_AP_SSID "easy"
@@ -255,6 +292,8 @@ void webServerLoop() {
 
 void setup() {
   Serial.begin(115200);
+  ledSetup();
+  ledOn(RED_LED);
   keySetup();
   readConfig();
 
@@ -265,6 +304,7 @@ void setup() {
 
   wifiSetup();
   webServerSetup();
+  ledOn(GREEN_LED);
 }
 
 
